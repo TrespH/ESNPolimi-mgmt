@@ -60,11 +60,6 @@ export default function EventsList() {
             size: 150,
         },
         {
-            accessorKey: 'cost',
-            header: names.cost,
-            size: 150,
-        },
-        {
             accessorKey: 'subscription_start_date',
             header: names.subscription_date_status,
             size: 150,

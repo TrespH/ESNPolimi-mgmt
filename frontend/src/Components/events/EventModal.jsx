@@ -1,26 +1,28 @@
-import React, {useEffect, useState} from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Modal, Box, TextField, FormControlLabel, Switch, Button, Checkbox, FormControl,
-    InputLabel, Select, MenuItem, IconButton, Paper, Typography, Tooltip
+    InputLabel, Select, MenuItem, IconButton, Paper, Typography, Tooltip, Chip
 } from '@mui/material';
 import Grid from '@mui/material/Grid2';
-import {LocalizationProvider, DatePicker, DateTimePicker} from '@mui/x-date-pickers';
-import {AdapterDayjs} from '@mui/x-date-pickers/AdapterDayjs';
+import { LocalizationProvider, DatePicker, DateTimePicker } from '@mui/x-date-pickers';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
 import dayjs from 'dayjs';
-import {Add as AddIcon, Delete as DeleteIcon, Info as InfoIcon} from '@mui/icons-material';
-import {fetchCustom} from "../../api/api";
-import {style, colorOptions} from '../../utils/sharedStyles'
-import {eventDisplayNames as eventNames} from '../../utils/displayAttributes';
+import { Add as AddIcon, Delete as DeleteIcon, Info as InfoIcon, Clear as ClearIcon } from '@mui/icons-material';
+import { fetchCustom } from "../../api/api";
+import { style, colorOptions } from '../../utils/sharedStyles'
+import { eventDisplayNames as eventNames } from '../../utils/displayAttributes';
 import CustomEditor from '../CustomEditor';
 import Loader from "../Loader";
 import StatusBanner from "../StatusBanner";
-import {extractErrorMessage} from "../../utils/errorHandling";
+import { extractErrorMessage } from "../../utils/errorHandling";
 
-export default function EventModal({open, event, isEdit, onClose}) {
+export default function EventModal({ open, event, isEdit, onClose }) {
     const [isLoading, setLoading] = useState(true);
     const title = isEdit ? 'Modifica Evento - ' + event.name : 'Crea Evento';
     const [statusMessage, setStatusMessage] = useState(null);
     const [hasSubscriptions, setHasSubscriptions] = useState(false);
+
+    const profile_fields_choices = ['Nome','Cognome','Email','Data di nascita','Paese','Corso di studi','Numero Telefono','Numero Whatsapp','Domicilio','Matricola','Documento','Codice persona','ESNcard']
 
     const [data, setData] = useState({
         id: '',
@@ -30,17 +32,22 @@ export default function EventModal({open, event, isEdit, onClose}) {
             '    <p>Ecco un <a href="https://www.italia.it" target="_blank">link all\'Italia</a>.</p>' +
             '    <blockquote>Citazione elegante.</blockquote>' +
             '    <p style="text-align: center;">Adios.</p>',
-        cost: '',
         subscription_start_date: dayjs().hour(12).minute(0),
         subscription_end_date: dayjs().hour(24).minute(0),
-        lists: [{id: '', name: 'Main List', capacity: ''}]
+        lists: [{ id: '', name: 'Main List', capacity: '' }],
+        form_questions: [
+            { text: 'What are your allergies?', type: 't' },
+            { text: 'Vegetarian?', type: 'c', choices: ['yes', 'no'] }],
+        profile_fields: ['Nome','Cognome'],
+        additional_fields: [ 
+            { name: 'Stato', type: 'c', choices: ['confermato','non confermato']},
+        ],
     });
 
     const [errors, setErrors] = React.useState({
         name: [false, ''],
         date: [false, ''],
         description: [false, ''],
-        cost: [false, ''],
         subscription_start_date: [false, ''],
         subscription_end_date: [false, ''],
         lists: [false, ''],
@@ -51,7 +58,7 @@ export default function EventModal({open, event, isEdit, onClose}) {
         if (isEdit) {
             console.log("Setting form data: ", event);
             setData(event);
-            console.log("#Subsciptions: ", event.subscriptions.length);
+            console.log("#Subscriptions: ", event.subscriptions.length);
             setHasSubscriptions(event.subscriptions.length > 0)
         }
         setLoading(false);
@@ -68,7 +75,7 @@ export default function EventModal({open, event, isEdit, onClose}) {
     const handleEventDateChange = (date) => {
         // Only allow dates from today onward
         if (date && dayjs(date).isBefore(dayjs(), 'day')) return;
-        setData({...data, date: date});
+        setData({ ...data, date: date });
     };
 
     const handleSubscriptionStartChange = (date) => {
@@ -80,7 +87,7 @@ export default function EventModal({open, event, isEdit, onClose}) {
                 subscription_end_date: dayjs(date).add(1, 'day'),
             });
         } else {
-            setData({...data, subscription_start_date: date});
+            setData({ ...data, subscription_start_date: date });
         }
     };
 
@@ -98,8 +105,93 @@ export default function EventModal({open, event, isEdit, onClose}) {
                 date = now;
             }
         }
-        setData({...data, subscription_end_date: date});
+        setData({ ...data, subscription_end_date: date });
     };
+
+    // Form questions and choices 
+    const handleQuestionChange = (index, event) => {
+        const { name, value } = event.target;
+        const updatedQuestions = data.form_questions.map((question, i) =>
+            i === index ? { ...question, [name]: value } : question
+        );
+        setData({ ...data, form_questions: updatedQuestions });
+    };
+
+    const handleQuestionDelete = (index) => {
+        const updatedQuestions = data.form_questions.filter((_, i) => i !== index);
+        setData({ ...data, form_questions: updatedQuestions });
+    }
+
+    const handleQuestionAdd = () => {
+        setData({ ...data, form_questions: [...data.form_questions, { 'text': '', 'type': 't' }] });
+    }
+
+    const handleChoiceAdd = (qIndex) => {
+        const updatedQuestions = data.form_questions.map((question, i) =>
+            i === qIndex ? { ...question, 'choices': question.choices ? [...question.choices, ''] : [''] } : question
+        );
+        setData({ ...data, form_questions: updatedQuestions })
+    }
+
+    const handleChoiceChange = (qIndex, cIndex, event) => {
+        const { name, value } = event.target;
+        const updatedChoices = data.form_questions[qIndex].choices.map((choice, i) => i === cIndex ? value : choice)
+        const updatedQuestions = data.form_questions.map((question, i) =>
+            i === qIndex ? { ...question, 'choices': updatedChoices } : question
+        );
+        setData({ ...data, form_questions: updatedQuestions })
+    }
+
+    const handleChoiceDelete = (qIndex, cIndex) => {
+        const updatedChoices = data.form_questions[qIndex].choices.filter((_, i) => i !== cIndex)
+        const updatedQuestions = data.form_questions.map((question, i) =>
+            i === qIndex ? { ...question, 'choices': updatedChoices } : question
+        );
+        setData({ ...data, form_questions: updatedQuestions })
+    }
+
+    // Colonne addizionali
+    const handleAdditionalFieldChange = (index, event) => {
+        const { name, value } = event.target;
+        const updatedFields = data.additional_fields.map((field, i) =>
+            i === index ? { ...field, [name]: value } : field
+        );
+        setData({ ...data, additional_fields: updatedFields });
+    };
+
+    const handleAdditionalFieldDelete = (index) => {
+        const updatedFields = data.additional_fields.filter((_, i) => i !== index);
+        setData({ ...data, additional_fields: updatedFields });
+    }
+
+    const handleAdditionalFieldAdd = () => {
+        setData({ ...data, additional_fields: [...data.additional_fields, { 'name': '', 'type': 't' }] });
+    }
+
+    const handleFieldChoiceAdd = (fIndex) => {
+        const updatedFields = data.additional_fields.map((field, i) =>
+            i === fIndex ? { ...field, 'choices': field.choices ? [...field.choices, ''] : [''] } : field
+        );
+        setData({ ...data, additional_fields: updatedFields })
+    }
+
+    const handleFieldChoiceChange = (fIndex, cIndex, event) => {
+        const { name, value } = event.target;
+        const updatedChoices = data.additional_fields[fIndex].choices.map((choice, i) => i === cIndex ? value : choice)
+        const updatedFields = data.additional_fields.map((field, i) =>
+            i === fIndex ? { ...field, 'choices': updatedChoices } : field
+        );
+        setData({ ...data, additional_fields: updatedFields })
+    }
+
+    const handleFieldChoiceDelete = (fIndex, cIndex) => {
+        const updatedChoices = data.additional_fields[fIndex].choices.filter((_, i) => i !== cIndex)
+        const updatedFields= data.additional_fields.map((field, i) =>
+            i === fIndex ? { ...field, 'choices': updatedChoices } : field
+        );
+        setData({ ...data, additional_fields: updatedFields })
+    }
+
 
     const convert = (data) => {
         return ({
@@ -108,7 +200,6 @@ export default function EventModal({open, event, isEdit, onClose}) {
             description: data.description,
             subscription_start_date: formatDateTimeString(data.subscription_start_date),
             subscription_end_date: formatDateTimeString(data.subscription_end_date),
-            cost: Number(data.cost).toFixed(2),
             lists: data.lists.map(t => ({
                 id: t.id,
                 name: t.name,
@@ -163,7 +254,7 @@ export default function EventModal({open, event, isEdit, onClose}) {
     }
 
     const handleInputChange = (event) => {
-        const {name, value, type, checked} = event.target;
+        const { name, value, type, checked } = event.target;
         setData({
             ...data,
             [name]: type === 'checkbox' ? checked : value,
@@ -173,16 +264,16 @@ export default function EventModal({open, event, isEdit, onClose}) {
     const handleAddList = () => {
         setData({
             ...data,
-            lists: [...data.lists, {id: '', name: '', capacity: ''}],
+            lists: [...data.lists, { id: '', name: '', capacity: '' }],
         });
     };
 
     const handleListChange = (index, event) => {
-        const {name, value} = event.target;
+        const { name, value } = event.target;
         const updatedLists = data.lists.map((list, i) =>
-            i === index ? {...list, [name]: value} : list
+            i === index ? { ...list, [name]: value } : list
         );
-        setData({...data, lists: updatedLists});
+        setData({ ...data, lists: updatedLists });
     };
 
     const handleDeleteList = (index) => {
@@ -201,9 +292,9 @@ export default function EventModal({open, event, isEdit, onClose}) {
             capacity: list.capacity === ''
         }));
         const hasListErrors = listErrors.some(error => error.name || error.capacity);
-        setErrors({...errors, listItems: listErrors, lists: [hasListErrors]});
+        setErrors({ ...errors, listItems: listErrors, lists: [hasListErrors] });
         if (hasListErrors) {
-            setStatusMessage({message: 'Errore campi Liste', state: 'error'});
+            setStatusMessage({ message: 'Errore campi Liste', state: 'error' });
             scrollUp();
             return;
         }
@@ -214,13 +305,13 @@ export default function EventModal({open, event, isEdit, onClose}) {
                 : await fetchCustom("POST", '/event/', convert(data));
             if (!response.ok) {
                 const errorMessage = await extractErrorMessage(response);
-                setStatusMessage({message: `Errore ${isEdit ? 'modifica' : 'creazione'} evento: ${errorMessage}`, state: 'error'});
+                setStatusMessage({ message: `Errore ${isEdit ? 'modifica' : 'creazione'} evento: ${errorMessage}`, state: 'error' });
                 scrollUp();
             } else onClose(true);
         } catch (error) {
             console.error("Error creating/updating event:", error);
             const errorMessage = await extractErrorMessage(error);
-            setStatusMessage({message: `Errore generale: ${errorMessage}`, state: "error"});
+            setStatusMessage({ message: `Errore generale: ${errorMessage}`, state: "error" });
             scrollUp();
         }
     }
@@ -301,9 +392,9 @@ export default function EventModal({open, event, isEdit, onClose}) {
     return (
         <Modal open={open} onClose={handleClose}>
             <Box sx={style} component="form" onSubmit={handleSubmit} noValidate={false}>
-                {isLoading ? <Loader/> : (<>
+                {isLoading ? <Loader /> : (<>
                     <Typography variant="h5" gutterBottom align="center">{title}</Typography>
-                    {statusMessage && (<StatusBanner message={statusMessage.message} state={statusMessage.state}/>)}
+                    {statusMessage && (<StatusBanner message={statusMessage.message} state={statusMessage.state} />)}
 
                     {isEdit && hasSubscriptions && (
                         <Box sx={{ mb: 2, p: 1, bgcolor: '#fff3e0', borderRadius: 1 }}>
@@ -315,7 +406,7 @@ export default function EventModal({open, event, isEdit, onClose}) {
                     )}
 
                     <Grid container spacing={2}>
-                        <Grid size={{xs: 12, md: 6}}>
+                        <Grid size={{ xs: 12, md: 6 }}>
                             <TextField
                                 fullWidth
                                 label={eventNames.name}
@@ -326,20 +417,20 @@ export default function EventModal({open, event, isEdit, onClose}) {
                                 error={errors.name[0]}
                             />
                         </Grid>
-                        <Grid size={{xs: 12, md: 6}}>
+                        <Grid size={{ xs: 12, md: 6 }}>
                             <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale='en-gb'>
                                 <DatePicker
                                     label={eventNames.date}
                                     value={data.date}
                                     onChange={handleEventDateChange}
                                     minDate={isEdit ? null : dayjs()}
-                                    renderInput={(params) => <TextField {...params} fullWidth required/>}
+                                    renderInput={(params) => <TextField {...params} fullWidth required />}
                                     required
                                     error={errors.date[0]}
                                 />
                             </LocalizationProvider>
                         </Grid>
-                        <Grid size={{xs: 12, md: 3}}>
+                        <Grid size={{ xs: 12, md: 3 }}>
                             <Tooltip title={isEdit && hasSubscriptions ? "Non modificabile con iscrizioni esistenti" : ""}>
                                 <div> {/* Wrapper div needed for Tooltip to work with disabled elements */}
                                     <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale='en-gb'>
@@ -362,53 +453,143 @@ export default function EventModal({open, event, isEdit, onClose}) {
                                 </div>
                             </Tooltip>
                         </Grid>
-                        <Grid size={{xs: 12, md: 3}}>
+                        <Grid size={{ xs: 12, md: 3 }}>
                             <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale='en-gb'>
                                 <DateTimePicker
                                     label={eventNames.subscription_end_date}
                                     value={data.subscription_end_date || null}
                                     onChange={handleSubscriptionEndChange}
                                     minDate={dayjs().isAfter(data.subscription_start_date) ? dayjs() : data.subscription_start_date || dayjs()}
-                                    slotProps={{textField: {fullWidth: true, required: true}}}
+                                    slotProps={{ textField: { fullWidth: true, required: true } }}
                                     required
                                     error={errors.subscription_start_date[0]}
                                 />
                             </LocalizationProvider>
                         </Grid>
-                        <Grid size={{xs: 12, md: 3}}>
+                        <Grid size={{ xs: 12, md: 3 }}>
                             <Tooltip title={isEdit && hasSubscriptions ? "Non modificabile con iscrizioni esistenti" : ""}>
                                 <div> {/* Wrapper div needed for Tooltip to work with disabled elements */}
-                                    <TextField
-                                        fullWidth
-                                        label={eventNames.cost}
-                                        name="cost"
-                                        type="number"
-                                        slotProps={{htmlInput: {min: "0", step: "0.01"}}}
-                                        value={data.cost}
-                                        onChange={handleInputChange}
-                                        placeholder="Inserisci 0 se gratuito"
-                                        required
-                                        error={errors.cost[0]}
-                                        disabled={isEdit && hasSubscriptions}
-                                    />
+
                                 </div>
                             </Tooltip>
                         </Grid>
                     </Grid>
-                    <Grid size={{xs: 12}} data-color-mode="light">
+                    <Grid my={2} size={{ xs: 12 }} data-color-mode="light">
                         <Typography variant="h6" component="div">{eventNames.description}</Typography>
                         <CustomEditor
                             value={data.description}
                             onChange={(value) => {
-                                setData({...data, description: value});
+                                setData({ ...data, description: value });
                             }}
                         />
                     </Grid>
+                    
+                    <Box my={2}>
+                        <Grid container spacing={2} alignItems="center">
+                            <Grid><Typography variant="h6" gutterBottom> Colonne anagrafica</Typography></Grid>
+                        </Grid>
+                        <Select
+                            multiple
+                            value={data.profile_fields}
+                            onChange={(e) => setData({...data, profile_fields : e.target.value})}
+                            renderValue={(selected) => (
+                                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+                                    {selected.map((val) => (
+                                        <Chip key={val} label={val} />
+                                    ))}
+                                </Box>
+                            )}
+
+                            fullWidth
+                        >
+                            {profile_fields_choices.map((opt) => (
+                                <MenuItem key={opt} value={opt}>
+                                    {opt}
+                                </MenuItem>
+                            ))}
+                        </Select>
+                    </Box>
+                    
+                    <Box my={2}>
+                        <Grid container spacing={2} alignItems="center">
+                            <Grid><Typography variant="h6" gutterBottom> Form </Typography></Grid>
+                            <Grid><Switch /></Grid>
+                            <Grid><IconButton onClick={() => handleQuestionAdd()} ><AddIcon /></IconButton></Grid>
+                        </Grid>
+                        {data.form_questions.map((question, qIndex) => (
+                            <Box>
+                                <Grid my={2} container spacing={2} alignItems="center">
+                                    <Grid><IconButton onClick={() => handleQuestionDelete(qIndex)}><DeleteIcon /></IconButton></Grid>
+                                    <Grid>
+                                        <TextField label="Domanda" name="text" value={question.text} onChange={(e) => handleQuestionChange(qIndex, e)} />
+                                    </Grid>
+                                    <Grid>
+                                        <TextField fullWidth label="Tipo" name="type" select value={question.type} onChange={(e) => handleQuestionChange(qIndex, e)}>
+                                            <MenuItem value={'t'}>Testo</MenuItem>
+                                            <MenuItem value={'n'}>Numero</MenuItem>
+                                            <MenuItem value={'c'}>Risposta singola</MenuItem>
+                                            <MenuItem value={'m'}>Risposta multipla</MenuItem>
+                                        </TextField>
+                                    </Grid>
+                                    {(question.type === 'c' || question.type === 'm') && <Grid><IconButton onClick={() => handleChoiceAdd(qIndex)}><AddIcon /></IconButton></Grid>}
+                                </Grid>
+                                {(question.type === 'c' || question.type === 'm') && question.choices && (question.choices.map((choice, cIndex) => (
+
+                                    <Grid ml={6} my={1} container spacing={1} alignItems="center">
+                                        <Grid><IconButton onClick={() => handleChoiceDelete(qIndex, cIndex)}><DeleteIcon /></IconButton></Grid>
+                                        <Grid ml={1}>
+                                            <TextField label="Risposta" value={choice} onChange={(e) => handleChoiceChange(qIndex, cIndex, e)} />
+                                        </Grid>
+                                    </Grid>
+                                ))
+                                )}
+                            </Box>
+
+                        ))}
+                    </Box>
+
+
+                    <Box my={2}>
+                        <Grid container spacing={2} alignItems="center">
+                            <Grid><Typography variant="h6" gutterBottom> Colonne aggiuntive </Typography></Grid>
+                            <Grid><IconButton ><AddIcon onClick={ () => handleAdditionalFieldAdd()} /></IconButton></Grid>
+                        </Grid>
+                        {data.additional_fields.map((field, fIndex) => (
+                            <Box>
+                                <Grid my={2} container spacing={2} alignItems="center">
+                                    <Grid><IconButton onClick={() => handleAdditionalFieldDelete(fIndex)}><DeleteIcon /></IconButton></Grid>
+                                    <Grid>
+                                        <TextField label="Nome colonna" name="name" value={field.name} onChange={(e) => handleAdditionalFieldChange(fIndex, e)} />
+                                    </Grid>
+                                    <Grid>
+                                        <TextField fullWidth label="Tipo" name="type" select value={field.type} onChange={(e) => handleAdditionalFieldChange(fIndex, e)}>
+                                            <MenuItem value={'t'}>Testo</MenuItem>
+                                            <MenuItem value={'n'}>Numero</MenuItem>
+                                            <MenuItem value={'c'}>Scelta singola</MenuItem>
+                                            <MenuItem value={'m'}>Scelta multipla</MenuItem>
+                                        </TextField>
+                                    </Grid>
+                                    {(field.type === 'c' || field.type === 'm') && <Grid><IconButton onClick={() => handleFieldChoiceAdd(fIndex)}><AddIcon /></IconButton></Grid>}
+                                </Grid>
+                                {(field.type === 'c' || field.type === 'm') && field.choices && (field.choices.map((choice, cIndex) => (
+
+                                    <Grid ml={6} my={1} container spacing={1} alignItems="center">
+                                        <Grid><IconButton onClick={() => handleFieldChoiceDelete(fIndex, cIndex)}><DeleteIcon /></IconButton></Grid>
+                                        <Grid ml={1}>
+                                            <TextField label="Risposta" value={choice} onChange={(e) => handleFieldChoiceChange(fIndex, cIndex, e)} />
+                                        </Grid>
+                                    </Grid>
+                                ))
+                                )}
+                            </Box>
+
+                        ))}
+                    </Box>
 
                     <Box my={2}>
                         <Grid container spacing={2} alignItems="center">
                             <Grid><Typography variant="h6" gutterBottom>Liste</Typography></Grid>
-                            <Grid><IconButton onClick={handleAddList}><AddIcon/></IconButton></Grid>
+                            <Grid><IconButton onClick={handleAddList}><AddIcon /></IconButton></Grid>
                         </Grid>
                         {data.lists.map((list, index) => (
                             <Grid container spacing={2} alignItems="center" mb={2} key={index}>
@@ -429,7 +610,7 @@ export default function EventModal({open, event, isEdit, onClose}) {
                                         name="capacity"
                                         type="number"
                                         value={list.capacity}
-                                        slotProps={{htmlInput: {min: "0", step: "1"}}}
+                                        slotProps={{ htmlInput: { min: "0", step: "1" } }}
                                         onChange={(e) => handleListChange(index, e)}
                                         placeholder="Inserisci 0 se illimitata"
                                         required
@@ -437,7 +618,7 @@ export default function EventModal({open, event, isEdit, onClose}) {
                                         helperText={errors.listItems[index]?.capacity ? "La capacità è obbligatoria" : ""}
                                     />
                                 </Grid>
-                                <Grid size={{xs: 2}}><IconButton onClick={() => handleDeleteList(index)}><DeleteIcon/></IconButton></Grid>
+                                <Grid size={{ xs: 2 }}><IconButton onClick={() => handleDeleteList(index)}><DeleteIcon /></IconButton></Grid>
                             </Grid>
                         ))}
                     </Box>
