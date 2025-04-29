@@ -2,7 +2,6 @@ from datetime import date
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
-from phonenumber_field.modelfields import PhoneNumberField
 from simple_history.models import HistoricalRecords
 
 
@@ -25,40 +24,37 @@ class BaseEntity(models.Model):
 
 # Class that describes a Profile
 class Profile(BaseEntity):
-    # Inner class describing the Profile.Gender type (it's like an enum inner class)
-    class Gender(models.TextChoices):
-        M = "M", _("Male")
-        F = "F", _("Female")
-        O = "O", _("Other")
-
-    # Same goes for Profile.Course
+    # Inner class describing the Profile.Course type (it's like an enum inner class)
     class Course(models.TextChoices):
-        ingegneria = "Engineering", _("Engineering")
-        architettura = "Architecture", _("Architecture")
-        design = "Design", _("Design")
+        ENGINEERING = "Engineering", _("Engineering")
+        ARCHITECTURE = "Architecture", _("Architecture")
+        DESIGN = "Design", _("Design")
 
     id = models.AutoField(primary_key=True)  # primary key
     email = models.EmailField(max_length=256, unique=True)
 
-    # this field is set to true if the email is verified, i.e. the user has
-    # received the automatic email sent by us (TODO) and clicked on the link
+    # This field is set to true if the email is verified, i.e. the user has received the automatic email sent by us
     email_is_verified = models.BooleanField(default=False)
 
     name = models.CharField(max_length=128)
     surname = models.CharField(max_length=128)
-    gender = models.CharField(max_length=1, choices=Gender.choices)
     birthdate = models.DateField(null=True)
-    country = CountryField(null=True)
+    country = models.CharField(max_length=2, null=True)  # Store country code (e.g., 'IT')
     course = models.CharField(max_length=32, choices=Course.choices, null=True)
-    phone = PhoneNumberField(null=True)
-    whatsapp = PhoneNumberField(blank=True)
+    phone_prefix = models.CharField(max_length=10, null=True)
+    phone_number = models.PositiveIntegerField(null=True)
+    whatsapp_prefix = models.CharField(max_length=10, null=True)
+    whatsapp_number = models.PositiveIntegerField(null=True)
     person_code = models.PositiveIntegerField(unique=True, null=True)
     domicile = models.CharField(max_length=256, null=True)
-    residency = models.CharField(max_length=256, null=True)
     is_esner = models.BooleanField(default=False)
     # Special fields that records all modifications made to the object.
     # Useful for rolling back to previous versions of the object. 
     history = HistoricalRecords()
+
+    # Matricola fields: expiration tightly coupled with the number, and with the exchange end date
+    matricola_number = models.IntegerField(unique=True, null=True)
+    matricola_expiration = models.DateField(null=True)
 
     # Return a string format of the profile object, contains only name, surname and email
     def __str__(self):
@@ -70,17 +66,14 @@ class Profile(BaseEntity):
     # Returns latest esncard released to the profile
     @property
     def latest_esncard(self):
-        return self.esncard_set.latest('created_at') if self.esncard_set.exists() else None
+        enabled_esncards = self.esncard_set.filter(enabled=True)
+        return enabled_esncards.latest('created_at') if enabled_esncards.exists() else None
 
     # Returns latest document of the profile
     @property
     def latest_document(self):
-        return self.document_set.latest('created_at') if self.document_set.exists() else None
-
-    # Returns latest matricola of the profile
-    @property
-    def latest_matricola(self):
-        return self.matricola_set.latest('created_at') if self.matricola_set.exists() else None
+        enabled_documents = self.document_set.filter(enabled=True)
+        return enabled_documents.latest('created_at') if enabled_documents.exists() else None
 
 
 # Class that describes document object
@@ -92,8 +85,11 @@ class Document(BaseEntity):
     profile = models.ForeignKey(Profile, on_delete=models.CASCADE)
 
     class Type(models.TextChoices):
-        passport = "Passport", _("Passport")
-        identity_card = "Identity Card", _("Identity Card")
+        PASSPORT = "Passport", _("Passport")
+        NATIONAL_ID = "National ID Card", _("National ID Card")
+        DRIVING_LICENSE = "Driving License", _("Driving License")
+        RESIDENCY_PERMIT = "Residency Permit", _("Residency Permit")
+        OTHER = "Other", _("Other")
 
     type = models.CharField(max_length=32, choices=Type.choices)
     number = models.CharField(unique=True, max_length=32)
@@ -103,14 +99,3 @@ class Document(BaseEntity):
     @property
     def is_valid(self):
         return date.today() < self.expiration
-
-
-# Class that describes matricola object
-class Matricola(BaseEntity):
-    id = models.AutoField(primary_key=True)
-
-    # foreign key to profile, because each matricola is linked to a profile,
-    # but a profile may have multiple matricole
-    profile = models.ForeignKey(Profile, on_delete=models.CASCADE)
-    number = models.IntegerField(unique=True)
-    exchange_end = models.DateField()

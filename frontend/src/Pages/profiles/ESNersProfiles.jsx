@@ -1,108 +1,94 @@
 import React, {useMemo} from 'react';
-import ProfilesList from '../Components/ProfilesList.jsx';
+import ProfilesList from './ProfilesList.jsx';
 import {Box, Chip, Typography} from "@mui/material";
 import BabyChangingStationIcon from '@mui/icons-material/BabyChangingStation';
-import Sidebar from "../Components/Sidebar";
-import SnowboardingIcon from "@mui/icons-material/Snowboarding";
+import Sidebar from "../../Components/Sidebar";
+import {profileDisplayNames as names} from '../../utils/displayAttributes';
+import countryCodes from "../../data/countryCodes.json";
 
 export default function ESNersProfiles() {
 
     const columns = useMemo(() => [
         {
             accessorKey: 'id',
-            header: 'Id',
+            header: names.id,
             size: 50,
         },
         {
             accessorKey: 'name',
-            header: 'Name',
+            header: names.name,
             size: 150,
         },
         {
             accessorKey: 'surname',
-            header: 'Surname',
+            header: names.surname,
             size: 150,
         },
         {
             accessorKey: 'groups',
-            header: 'Group',
+            header: names.groups,
             size: 150,
         },
         {
             accessorKey: 'email',
-            header: 'Email',
+            header: names.email,
             size: 150,
         },
         {
-            accessorKey: 'latest_esncard.number',
-            header: 'Latest ESNcard',
+            accessorKey: 'latest_esncard',
+            header: names.latest_esncard,
             size: 50,
             Cell: ({cell}) => (
                 <Box sx={{}}>
-                    {cell.getValue() !== undefined ? (
-                        <Chip label={cell.getValue()} color="success"/>
+                    {cell.getValue() !== null ? (
+                        <Chip label={cell.getValue().number} color={cell.getValue().is_valid ? "success" : "warning"}/>
                     ) : (
-                        <Chip label="No ESNcard" color="error"/>
+                        <Chip label="Nessuna ESNcard" color="error"/>
                     )}
                 </Box>
             ),
         },
         {
-            accessorKey: 'whatsapp',
-            header: 'Whatsapp number',
-            size: 150,
-        },
-        {
             accessorKey: 'country',
-            header: 'Country',
+            header: names.country,
             size: 150,
-        },
-        {
-            accessorKey: 'gender',
-            header: 'Gender',
-            size: 50,
-            Cell: ({cell}) => (
-                <Box sx={{textAlign: 'center'}}>{cell.getValue()}</Box>
-            ),
+            Cell: ({row}) => {
+                const countryCode = row.original.country;
+                const country = countryCodes.find(c => c.code === countryCode);
+                return country ? country.name : countryCode || '(vuoto)';
+            },
         },
         {
             accessorKey: 'birthdate',
-            header: 'Birthdate',
+            header: names.birthdate,
             size: 100,
         },
         {
-            accessorKey: 'course',
-            header: 'Course',
-            size: 100,
-        },
-        {
-            accessorKey: 'phone',
-            header: 'Phone number',
+            id: 'fullPhoneNumber',
+            header: names.phone_number,
             size: 150,
+            Cell: ({row}) => (
+                <span>({row.original.phone_prefix || 'vuoto'}) {row.original.phone_number || '(vuoto)'}</span>
+            ),
         },
         {
             accessorKey: 'person_code',
-            header: 'Person code',
+            header: names.person_code,
             size: 150,
         },
         {
             accessorKey: 'domicile',
-            header: 'Domicile',
+            header: names.domicile,
             size: 200,
         },
         {
-            accessorKey: 'residency',
-            header: 'Residency',
-            size: 200,
-        },
-        {
-            accessorKey: 'latest_document.number',
-            header: 'Latest document',
+            accessorKey: 'matricola_number',
+            header: names.matricola_number,
             size: 50,
         },
         {
-            accessorKey: 'latest_matricola.number',
-            header: 'Matricola',
+            accessorKey: 'latest_document.number',
+            header: names.latest_document,
             size: 50,
         },
     ], []);
@@ -113,17 +99,13 @@ export default function ESNersProfiles() {
         surname: true,
         groups: true,
         email: true,
-        whatsapp: true,
         country: true,
-        gender: false,
         birthdate: false,
-        course: false,
-        phone: false,
+        fullPhoneNumber: true,
         person_code: false,
         domicile: false,
-        residency: false,
+        matricola_number: false,
         'latest_document.number': false,
-        'latest_matricola.number': false,
     }
 
     return (

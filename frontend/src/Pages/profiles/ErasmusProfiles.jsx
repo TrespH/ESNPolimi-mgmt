@@ -1,104 +1,105 @@
 import React, {useMemo} from 'react';
-import ProfilesList from '../Components/ProfilesList.jsx';
+import ProfilesList from './ProfilesList.jsx';
 import {Box, Chip, Typography} from "@mui/material";
 import SnowboardingIcon from '@mui/icons-material/Snowboarding';
-import Sidebar from "../Components/Sidebar";
+import Sidebar from "../../Components/Sidebar";
+import {profileDisplayNames as names} from "../../utils/displayAttributes";
+import countryCodes from "../../data/countryCodes.json";
 
 export default function ErasmusProfiles() {
 
     const columns = useMemo(() => [
         {
             accessorKey: 'id',
-            header: 'Id',
+            header: names.id,
             size: 50,
         },
         {
             accessorKey: 'name',
-            header: 'Nome',
+            header: names.name,
             size: 150,
         },
         {
             accessorKey: 'surname',
-            header: 'Cognome',
+            header: names.surname,
             size: 150,
         },
         {
             accessorKey: 'email',
-            header: 'Email',
+            header: names.email,
             size: 150,
         },
         {
-            accessorKey: 'latest_esncard.number',
-            header: 'Ultima ESNcard',
+            accessorKey: 'latest_esncard',
+            header: names.latest_esncard,
             size: 50,
             Cell: ({cell}) => (
                 <Box sx={{}}>
-                    {cell.getValue() !== undefined ? (
-                        <Chip label={cell.getValue()} color="success"/>
+                    {cell.getValue() !== null ? (
+                        <Chip label={cell.getValue().number} color={cell.getValue().is_valid ? "success" : "warning"}/>
                     ) : (
-                        <Chip label="No ESNcard" color="error"/>
+                        <Chip label="Nessuna ESNcard" color="error"/>
                     )}
                 </Box>
             ),
         },
         {
-            accessorKey: 'whatsapp',
-            header: 'Numero WhatsApp',
-            size: 150,
-        },
-        {
             accessorKey: 'country',
-            header: 'Nazione',
+            header: names.country,
             size: 150,
-        },
-        {
-            accessorKey: 'gender',
-            header: 'Genere',
-            size: 50,
-            Cell: ({cell}) => (
-                <Box sx={{textAlign: 'center'}}>{cell.getValue()}</Box>
-            ),
+            Cell: ({row}) => {
+                const countryCode = row.original.country;
+                const country = countryCodes.find(c => c.code === countryCode);
+                return country ? country.name : countryCode || '(vuoto)';
+            },
         },
         {
             accessorKey: 'birthdate',
-            header: 'Data di nascita',
+            header: names.birthdate,
             size: 100,
         },
         {
             accessorKey: 'course',
-            header: 'Corso',
+            header: names.course,
             size: 100,
         },
         {
-            accessorKey: 'phone',
-            header: 'Numero di telefono',
+            id: 'fullPhoneNumber',
+            header: names.phone_number,
             size: 150,
+            Cell: ({row}) => (
+                <span>({row.original.phone_prefix || 'vuoto'}) {row.original.phone_number || '(vuoto)'}</span>
+            ),
         },
         {
-            accessorKey: 'person_code',
-            header: 'Codice persona',
+            id: 'fullWANumber',
+            header: names.whatsapp_number,
             size: 150,
+            Cell: ({row}) => (
+                <span>({row.original.whatsapp_prefix || 'vuoto'}) {row.original.whatsapp_number || '(vuoto)'}</span>
+            ),
         },
         {
             accessorKey: 'domicile',
-            header: 'Domicilio',
+            header: names.domicile,
             size: 200,
         },
         {
-            accessorKey: 'residency',
-            header: 'Residenza',
-            size: 200,
+            accessorKey: 'matricola_number',
+            header: names.matricola_number,
+            size: 50,
+        },
+        {
+            accessorKey: 'matricola_expiration',
+            header: names.matricola_expiration,
+            size: 50,
         },
         {
             accessorKey: 'latest_document.number',
-            header: 'Ultimo documento',
+            header: names.latest_document,
             size: 50,
         },
-        {
-            accessorKey: 'latest_matricola.number',
-            header: 'Matricola',
-            size: 50,
-        },
+
     ], []);
 
     const columnVisibility = {
@@ -106,17 +107,16 @@ export default function ErasmusProfiles() {
         name: true,
         surname: true,
         email: true,
-        whatsapp: true,
         country: false,
-        gender: false,
         birthdate: false,
         course: false,
-        phone: false,
+        fullPhoneNumber: true,
+        fullWANumber: true,
         person_code: false,
         domicile: false,
-        residency: false,
+        matricola_number: false,
+        matricola_expiration: false,
         'latest_document.number': false,
-        'latest_matricola.number': false,
     }
 
     return (

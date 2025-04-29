@@ -1,5 +1,4 @@
 import logging
-from django.core.mail import send_mail
 from django.db import transaction
 from django.contrib.auth.models import Group
 from rest_framework.decorators import api_view, permission_classes
@@ -7,12 +6,17 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.conf import settings
-from profiles.models import Profile, Document, Matricola
+from profiles.models import Profile, Document
 from profiles.serializers import ProfileListViewSerializer, ProfileCreateSerializer, ProfileDetailViewSerializer
-from profiles.serializers import MatricolaCreateSerializer, DocumentCreateSerializer, MatricolaEditSerializer, DocumentEditSerializer, ProfileFullEditSerializer, ProfileBasicEditSerializer
-from profiles.tokens import email_verification_token
-from users.managers import UserManager
+from profiles.serializers import DocumentCreateSerializer, DocumentEditSerializer, ProfileFullEditSerializer, ProfileBasicEditSerializer
 from users.models import User
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
+from profiles.tokens import email_verification_token
+from django.utils.http import urlsafe_base64_decode
+from django.utils.encoding import force_str
+from django.core.mail import EmailMultiAlternatives
+from django.db.models import Q
 
 logger = logging.getLogger(__name__)
 HOSTNAME = settings.HOSTNAME
@@ -34,65 +38,133 @@ def erasmus_profile_list(request):
         return Response(status=500)
 
 
-# Endpoint to create a profile, document and matricola together.
 @api_view(['POST'])
-def profile_creation(request):
+def initiate_profile_creation(request):
     try:
         data = request.data
 
-        is_esner = data.get('is_esner', False)  # Check if the user is an ESN member
-
-        # Create profile
+        # Validate data but don't save yet
         profile_serializer = ProfileCreateSerializer(data=data)
-        document_serializer = DocumentCreateSerializer(data={k[9:]: v for k, v in data.items() if k.startswith('document-')}, partial=True)
-        matricola_serializer = MatricolaCreateSerializer(data={k[10:]: v for k, v in data.items() if k.startswith('matricola-')}, partial=True)
+        document_serializer = DocumentCreateSerializer(
+            data={k[9:]: v for k, v in data.items() if k.startswith('document-')},
+            partial=True
+        )
 
-        if profile_serializer.is_valid() and document_serializer.is_valid() and matricola_serializer.is_valid():
+        profile_valid = profile_serializer.is_valid()
+        document_valid = document_serializer.is_valid()
 
-            # Data is valid: create objects
+        if profile_valid and document_valid:
             with transaction.atomic():
-                profile = profile_serializer.save()
-                document_serializer.save(profile=profile)
-                matricola_serializer.save(profile=profile)
+                # Store validated data, set flags and create profile
+                profile_data = profile_serializer.validated_data.copy()
+                profile_data['enabled'] = False
+                profile_data['email_is_verified'] = False
+                profile = Profile.objects.create(**profile_data)
 
-                # If ESN member, create an associated User
-                if is_esner:
+                # Create document (disabled until email verification) and create it
+                document_data = document_serializer.validated_data.copy()
+                document_data['enabled'] = False
+                Document.objects.create(profile=profile, **document_data)
+
+                # Create user if ESN member
+                is_esner = profile_data.get('is_esner', False)
+                if is_esner and 'password' in data:
                     user = User.objects.create_user(
-                        profile=profile, # Link user to profile
-                        password=data.get('password', UserManager().make_random_password())  # Generate a password if none provided
+                        profile=profile,
+                        password=data.get('password')
                     )
-                    # Assign to the "Aspirant" group
+                    user.is_active = False  # Will be activated upon verification
                     aspirant_group, created = Group.objects.get_or_create(name="Aspirant")
                     user.groups.add(aspirant_group)
 
-                # Send email for email verification
-                token = email_verification_token.make_token(profile)
-                verification_link = HOSTNAME + '/profile/' + str(profile.pk) + '/verification/' + token
+            # Generate verification token and send verification email
+            uid = urlsafe_base64_encode(force_bytes(profile.pk))
+            token = email_verification_token.make_token(profile)
+            verification_link = f"http://{HOSTNAME}:3000/#/verify-email/{uid}/{token}"  # TODO: set proper url
+            try:
+                subject = "Email verification for ESN Polimi"
+                from_email = settings.DEFAULT_FROM_EMAIL
+                to_email = [profile.email]
+                text_content = f"Click the following link to verify your email: {verification_link}"
+                html_content = f"""
+                <html>
+                <body>
+                    <h2>Welcome to ESN Polimi!</h2>
+                    <p>Please click the following link to verify your email:</p>
+                    <p><a href="{verification_link}" style="background-color:#1a73e8; color:white; padding:10px 20px; text-decoration:none; border-radius:4px; display:inline-block;">Verify Email Address</a></p>
+                    <p>If the button doesn't work, copy and paste this URL into your browser:</p>
+                    <p>{verification_link}</p>
+                    <p>This link will expire in 24 hours.</p>
+                </body>
+                </html>
+                """
 
-                send_mail(
-                    "Email verification",
-                    verification_link,
-                    "noreply@" + HOSTNAME,
-                    [profile.email],
-                    fail_silently=False
-                )
+                email = EmailMultiAlternatives(subject, text_content, from_email, to_email)
+                email.attach_alternative(html_content, "text/html")
+                email.send(fail_silently=False)
 
-            return Response({"message": "Profile created successfully."}, status=200)
+                print(f"Email sent to {profile.email}")
+            except Exception as e:
+                print(f"Email error: {str(e)}")
+                # Don't delete profile on email error, just return the error
+                return Response({"error": f"Errore nell'invio dell'email: {str(e)}"}, status=500)
 
+            return Response({
+                "message": "Email di verifica inviata. Controlla la tua casella di posta per completare la registrazione."
+            })
         else:
-            # Calling is_valid() is needed to access errors. In the 'if' statement they may not have been called
-            profile_serializer.is_valid()
-            document_serializer.is_valid()
-            matricola_serializer.is_valid()
-            # Data is invalid: return bad request (400) and errors
-            errors = {k: v[0] for k, v in profile_serializer.errors.items()}
-            errors.update({'document-' + k: v[0] for k, v in document_serializer.errors.items()})
-            errors.update({'matricola-' + k: v[0] for k, v in matricola_serializer.errors.items()})
+            # Return validation errors
+            errors = {}
+            if not profile_valid:
+                errors.update({k: v[0] for k, v in profile_serializer.errors.items()})
+            if not document_valid:
+                errors.update({'document-' + k: v[0] for k, v in document_serializer.errors.items()})
             return Response(errors, status=400)
 
     except Exception as e:
         logger.error(str(e))
-        return Response(status=500)
+        return Response({"error": "Si è verificato un errore imprevisto: " + str(e)}, status=500)
+
+
+@api_view(['GET'])
+def verify_email_and_enable_profile(request, uid, token):
+    try:
+        # Get profile from uid
+        try:
+            uid = force_str(urlsafe_base64_decode(uid))
+            profile = Profile.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, Profile.DoesNotExist):
+            return Response({"error": "Link di verifica non valido."}, status=400)
+
+        if not email_verification_token.check_token(profile, token):
+            return Response({"error": "Link di verifica non valido o scaduto."}, status=400)
+
+        if profile.email_is_verified:
+            return Response({"message": "Email già verificata."}, status=200)
+
+        # Activate profile and related objects
+        with transaction.atomic():
+            profile.email_is_verified = True
+            profile.enabled = True
+            profile.save()
+
+            # Enable document
+            Document.objects.filter(profile=profile).update(enabled=True)
+
+            # Activate user if esner
+            if profile.is_esner:
+                try:
+                    user = User.objects.get(profile=profile)
+                    user.is_active = True
+                    user.save()
+                except User.DoesNotExist:
+                    return Response({"error": "L'utente associato a questo profilo non esiste."}, status=500)
+
+        return Response({"message": "Email verificata e profilo attivato con successo!"})
+
+    except Exception as e:
+        logger.error(str(e))
+        return Response({"error": "Si è verificato un errore imprevisto."}, status=500)
 
 
 # Endpoint to view in detail, edit, delete a profile
@@ -106,13 +178,12 @@ def profile_detail(request, pk):
             return Response(serializer.data)
 
         elif request.method == 'PATCH':
-            print(request.user.groups.all())
             if request.user.has_perm('profiles.change_profile'):
                 serializer = ProfileFullEditSerializer(profile, data=request.data, partial=True)
-            elif request.user.has_perm('profiles.change_person_code'): # TODO: permission to define via Meta in the model
+            elif request.user.has_perm('profiles.change_person_code'):  # TODO: permission to define via Meta in the model
                 serializer = ProfileBasicEditSerializer(profile, data=request.data, partial=True)
             else:
-                return Response({'error': 'You do not have permission to delete this profile.'}, status=403)
+                return Response({'error': 'Non hai i permessi per modificare questo profilo.'}, status=403)
 
             if serializer.is_valid():
                 serializer.save()
@@ -124,14 +195,14 @@ def profile_detail(request, pk):
                 profile.enabled = False
                 profile.save()
                 return Response(status=200)
-            return Response(status=401)
+            return Response({'error': 'Non hai i permessi per eliminare questo profilo.'}, status=401)
 
     except Profile.DoesNotExist:
-        return Response('Profile does not exist', status=404)
+        return Response('Il profilo non esiste.', status=404)
 
     except Exception as e:
         logger.error(str(e))
-        return Response(status=500)
+        return Response({'error': 'Si è verificato un errore imprevisto.'}, status=500)
 
 
 # Endpoint to verify email
@@ -142,16 +213,16 @@ def profile_verification(request, pk, token):
         if email_verification_token.check_token(profile, token):
             profile.email_is_verified = True
             profile.save()
-            return Response('Email verified', status=200)
+            return Response('Email verificata.', status=200)
         else:
-            return Response('Invalid token', status=400)
+            return Response('Token non valido.', status=400)
 
     except Profile.DoesNotExist:
-        return Response('Profile does not exist', status=400)
+        return Response('Il profilo non esiste.', status=400)
 
     except Exception as e:
         logger.error(str(e))
-        return Response(status=500)
+        return Response('Si è verificato un errore imprevisto.', status=500)
 
 
 # Endpoint to create document
@@ -170,63 +241,75 @@ def document_creation(request):
 
     except Exception as e:
         logger.error(str(e))
-        return Response(status=500)
+        return Response('Si è verificato un errore imprevisto.', status=500)
 
 
-@api_view(['PATCH'])
+@api_view(['PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def document_detail(request, pk):
     try:
         document = Document.objects.get(pk=pk)
-        document_serializer = DocumentEditSerializer(document, data=request.data, partial=True)
+        if request.method == 'PATCH':
+            if request.user.has_perm('profiles.change_document'):
+                document_serializer = DocumentEditSerializer(document, data=request.data, partial=True)
+                if document_serializer.is_valid():
+                    document_serializer.save()
+                    return Response(status=200)
+                else:
+                    return Response(document_serializer.errors, status=400)
+            else:
+                return Response({'error': 'Non hai i permessi per modificare questo documento.'}, status=403)
 
-        if document_serializer.is_valid():
-            document_serializer.save()
-            return Response(status=200)
-        else:
-            return Response(document_serializer.errors, status=400)
+        elif request.method == 'DELETE':
+            if request.user.has_perm('profiles.delete_document'):
+                document.enabled = False
+                document.save()
+                return Response(status=200)
+            else:
+                return Response({'error': 'Non hai i permessi per eliminare questo documento.'}, status=403)
 
     except Document.DoesNotExist:
-        return Response('Document does not exist', status=400)
+        return Response('Il documento non esiste.', status=400)
 
     except Exception as e:
         logger.error(str(e))
-        return Response(status=500)
+        return Response(str(e), status=500)
 
 
-@api_view(['POST'])
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def matricola_creation(request):
+def search_profiles(request):
     try:
-        matricola_serializer = MatricolaCreateSerializer(data=request.data)
+        query = request.GET.get('q', '')
+        print("AA Query: ", query)
+        valid_only = request.GET.get('valid_only', 'false').lower() == 'true'
+        esner_only = request.GET.get('esner_only', 'false').lower() == 'true'
 
-        if matricola_serializer.is_valid():
-            matricola_serializer.save()
-            return Response(matricola_serializer.data, status=200)
-        else:
-            return Response(matricola_serializer.errors, status=400)
+        if len(query) < 2:
+            return Response({"results": []})
+
+        # Search by name, surname, or esncard
+        profiles = Profile.objects.filter(
+            Q(name__icontains=query) |
+            Q(surname__icontains=query) |
+            Q(esncard__number__icontains=query)
+        ).distinct()
+
+        if valid_only:
+            profiles = profiles.filter(enabled=True, email_is_verified=True)
+
+        if esner_only:
+            profiles = profiles.filter(is_esner=True)
+
+        # Order by most relevant (exact matches first, then contains)
+        profiles = profiles.order_by('-created_at')
+
+        paginator = PageNumberPagination()
+        page = paginator.paginate_queryset(profiles, request=request)
+        serializer = ProfileListViewSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
     except Exception as e:
         logger.error(str(e))
-        return Response(status=500)
+        return Response({"error": "Si è verificato un errore: " + str(e)}, status=500)
 
-
-@api_view(['PATCH'])
-@permission_classes([IsAuthenticated])
-def matricola_detail(request, pk):
-    try:
-        matricola = Matricola.objects.get(pk=pk)
-        matricola_serializer = MatricolaEditSerializer(matricola, data=request.data, partial=True)
-
-        if matricola_serializer.is_valid():
-            matricola_serializer.save()
-            return Response(status=200)
-        else:
-            return Response(matricola_serializer.errors, status=400)
-
-    except Matricola.DoesNotExist:
-        return Response('Matricola does not exist', status=400)
-
-    except Exception as e:
-        logger.error(str(e))
-        return Response(status=500)

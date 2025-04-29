@@ -1,14 +1,14 @@
 import React, {useEffect, useState} from 'react';
-import {Box, IconButton} from '@mui/material';
+import {Box} from '@mui/material';
 import {MaterialReactTable, useMaterialReactTable} from 'material-react-table';
-import EditIcon from '@mui/icons-material/Edit';
-import {fetchCustom} from '../api/api';
-import ProfileModal from './ProfileModal.jsx';
+import {fetchCustom} from '../../api/api';
+import ProfileModal from '../../Components/profiles/ProfileModal.jsx';
 import {MRT_Localization_IT} from "material-react-table/locales/it";
+import Loader from "../../Components/Loader";
 
 export default function ProfilesList({apiEndpoint, columns, columnVisibility, profileType}) {
     const [data, setData] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [isLoading, setLoading] = useState(true);
     const [modalOpen, toggleModal] = useState(false);
     const [selectedProfile, setSelectedProfile] = useState({});
 
@@ -17,7 +17,7 @@ export default function ProfilesList({apiEndpoint, columns, columnVisibility, pr
             try {
                 const response = await fetchCustom('GET', apiEndpoint);
                 const json = await response.json();
-                if (apiEndpoint === '/user_profiles/') {
+                if (profileType === 'ESNer') {
                     const formattedData = json.results.map(({profile, ...rest}) => ({
                         ...rest,
                         ...profile,
@@ -31,7 +31,6 @@ export default function ProfilesList({apiEndpoint, columns, columnVisibility, pr
                 setLoading(false);
             }
         };
-
         fetchData().then();
     }, [apiEndpoint]);
 
@@ -45,7 +44,7 @@ export default function ProfilesList({apiEndpoint, columns, columnVisibility, pr
         enableGrouping: true,
         enableColumnPinning: true,
         enableFacetedValues: true,
-        enableRowActions: true,
+        enableRowActions: false,
         enableRowSelection: false,
         enableRowPinning: true,
         enableExpandAll: false,
@@ -71,25 +70,32 @@ export default function ProfilesList({apiEndpoint, columns, columnVisibility, pr
             variant: 'outlined',
         },
         localization: MRT_Localization_IT,
-
-        renderRowActions: ({row}) => {
-            return (
-                <IconButton variant='contained' onClick={() => {
-                    setSelectedProfile(row.original);
-                    toggleModal(true);
-                }}>
-                    <EditIcon/>
-                </IconButton>
-            )
-        },
+        muiTableBodyRowProps: ({row}) => ({
+            onClick: () => {
+                setSelectedProfile(row.original);
+                toggleModal(true);
+            },
+        }),
     });
 
     const updateProfile = (newData) => {
-        setData((prevProfiles) =>
-            prevProfiles.map((profile) =>
-                profile.id === newData.id ? newData : profile
-            )
-        );
+        console.log("New data: ", newData);
+        setData((prevProfiles) => {
+            return prevProfiles.map((profile) => {
+                if (profile.id === newData.id) {
+                    // For ESNers, maintain the structure with profile as nested object
+                    if (profileType === 'ESNer') {
+                        return {
+                            ...profile,
+                            ...newData,
+                            profile: {...profile.profile, ...newData}
+                        };
+                    }
+                    return newData;
+                }
+                return profile;
+            });
+        });
     };
 
     const handleProfileClose = () => {
@@ -98,16 +104,14 @@ export default function ProfilesList({apiEndpoint, columns, columnVisibility, pr
 
     return (
         <Box sx={{mx: '5%'}}>
-            <MaterialReactTable table={table}/>
-            {modalOpen && (
-                <ProfileModal
-                    profile={selectedProfile}
-                    profileType={profileType}
-                    open={modalOpen}
-                    handleClose={handleProfileClose}
-                    updateProfile={updateProfile}
-                />
-            )}
+            {isLoading ? <Loader/> : <MaterialReactTable table={table}/>}
+            {modalOpen && <ProfileModal
+                open={modalOpen}
+                inProfile={selectedProfile}
+                profileType={profileType}
+                handleClose={handleProfileClose}
+                updateProfile={updateProfile}
+            />}
         </Box>
     );
 }
